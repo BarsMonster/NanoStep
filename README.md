@@ -25,6 +25,16 @@ If angle sensor works, but closed loop control does not - there are 2 options:
 - Stepper direction is incorrect. You can set PI to 0, and see if system starts to work (effectively this converts system to open loop mode). if it works in open loop, and error is increasing with rotation - swap 2 pins on the left or on the right of the motor. 
 - Stepper motor pinout is incorrect. Swap 2 central pins on motor. 
 
+## 1.8 vs 0.9° motors
+NanoStep only supports 1.8° steppers, and routinely achieves <0.02° angular error thanks to effectively 1024-microstepping. 0.9° does not improve anything for closed loop operation and actually make it worse:
+- Lower maximum rotation speed (as step rate is limited) 
+- Smaller pauses between steps allow less time for error correction
+- Less torque
+- Step-2-step non-linearity is most challenging part of closed loop steppers. 0.9° motors only make it worse. 
+- Easier to loose step
+
+Therefore, I hightly recommend to stick to 1.8° motors. If these were available, I would even actually recommend using 3.6-7.2° motors. 
+
 ## Key changes
 - Calibration is no longer needed. Autocalibration is enabled in TLE5012. Requires 1.5 rotation for calibration. For perfect results - you can do Z axis move in the beginning of the print. Instead of calibration there is now "Reset" which resets settings to default. 
 - TLE5012 now utilizes full 15-bit resolution vs 14-bit before. FIR filter further improves results. 

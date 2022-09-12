@@ -6,14 +6,14 @@
  * 
  * 
  * FLASH STORAGE LAYOUT
- * The first 31kB (31744 bytes) holds the program code.
+ * The first 63kB holds the program code.
  * The next 1kB holds the parameters.
- * The remaining 32kB holds the calibration table
+ * Calibration table is no longer needed
  * 
  * Parameter Layout
  * HalfWord     Description
  * ----------   -----------
- * 0            Calibration Flag. Calibrated = 0xAA
+ * 0            Calibration Flag. Calibrated = 0xBB
  * 1            Motor Current
  * 2            
  * 3            Step Size
@@ -28,7 +28,9 @@
 
 #define STM32_FLASH_SIZE 64
 #define STM32_FLASH_BASE        0x8000000           // SOC Flash Base Address 
-#define Data_Store_Address      0x8007C00           // Flash data storage address (last page of first 32kB, make sure program size stays below it!)  
+
+//Moving data store to the end of 64kB
+#define Data_Store_Address      0x800FC00           // Flash data storage address (last page of first 64kB, make sure program size stays below it!)  
 
 #if STM32_FLASH_SIZE < 256
     #define STM_SECTOR_SIZE 1024

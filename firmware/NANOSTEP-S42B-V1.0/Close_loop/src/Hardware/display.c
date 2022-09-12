@@ -1,22 +1,30 @@
 #include "main.h"
 #include "display.h"
 #include "oled.h"
-#include "menu.h"
+#include "string.h"
+#include "stdlib.h"
+#include "tle5012b.h"
+#include "buttons.h"
 
 // Declare menu and menu items (should be in global space)
 //struct Menu menuMain;
+struct Menu menuMain;
+
 struct menuItem menuItemCalibrate;
 struct menuItem menuItemCurrent;
 struct menuItem menuItemStepSize;
 struct menuItem menuItemEnablePin;
-struct menuItem menuItemDirectionPin;
-struct menuItem menuItemClosedLoopMode;
+//struct menuItem menuItemDirectionPin;
 struct menuItem menuItemPID_P;
 struct menuItem menuItemPID_I;
 struct menuItem menuItemPID_D;
 struct menuItem menuItemOLEDFreq;
 struct menuItem menuItemSave;
 struct menuItem menuItemExit;
+struct menuItem menuItemMag;
+
+//idle counter for screensaver
+uint32_t idle_cycles = 0;
 
 
 // Convert to mA by multiplying by 6.5
@@ -30,8 +38,55 @@ uint16_t Converter_Current(uint16_t valueIn)
 // Convert to microstep ratio
 uint16_t Converter_Stepsize(uint16_t valueIn)
 {
-  uint16_t valueOut = 64 / valueIn;
+  uint16_t valueOut = 128 / valueIn;
   return valueOut;
+}
+
+void magDisplay()
+{
+  menuActive = 0;
+  OLED_Clear();
+  //Show splashscreen
+  for(int x=0;x<128;x++)OLED_DrawPoint(x,18, x&3);
+  OLED_Refresh_Gram();
+ 
+  char buffer[100];
+ 
+  uint8_t key;
+  tickCount+=101;
+  while(KeyScan(&key))
+  {
+    tickCount+=100;
+    LL_mDelay(50);
+  }
+  __disable_irq();
+  while(!KeyScan(&key))
+  {
+    //1_0000_0_000010_0001
+    int16_t mx = ReadValue_16bit(0x8100);//ADC - X
+    int16_t my = ReadValue_16bit(0x8110);//ADC - Y
+    int16_t mcx = ReadValue_16bit(0x80a0);//Center offset X - DC
+    int16_t mcy = ReadValue_16bit(0x80b0);//Center offset Y - DC
+    float d = powf(powf(mx,2)+powf(my,2),0.5f)/32768.0f*100.0f;
+
+    snprintf(buffer, 100, "D:%5.1f%% MagView", (double)d);//printf cannot consume float anyways
+    OLED_ShowString(0, -3, buffer);
+    snprintf(buffer, 100, "X:%5.1f%%  %5.1f%%", (double)(mx/328.0f), (double)((mcx>>4)/20.48f));
+    OLED_ShowString(0, 22, buffer);
+    snprintf(buffer, 100, "Y:%5.1f%%  %5.1f%%", (double)(my/328.0f), (double)((mcy>>4)/20.48f));
+    OLED_ShowString(0, 42, buffer);
+    OLED_Refresh_Gram();
+    LL_mDelay(50);
+    tickCount+=50;//To enable key debouncing, maybe a little too fast - but IRQs are disabled, so we can't do timer updates. 50 = 2 tics per button press
+    // Kick the dog
+    LL_IWDG_ReloadCounter(IWDG);
+
+  }
+  __enable_irq();
+
+  //Going back to regular display, menu off
+  OLED_Clear();
+  ShowInfoScreen();
 }
 
 
@@ -54,61 +109,18 @@ void Changer_StepSize(struct Menu *menu, int16_t val)
   } 
 }
 
-
-// Override function for the default item value changer
-void Changer_ClosedLoopMode(struct Menu *menu, int16_t val)
-{  
-  if (val == 1)
-  {
-    closemode = 1;
-    PID_Cal_value_init();    
-  }    
-  else
-  {
-    closemode = 0;
-  }  
-}
-
-
-void ShowStartupScreen()
-{
-    OLED_Clear();                              
-    OLED_ShowString(0,0,"   TrueStep   ");
-}
-
-
 void ShowInfoScreen()
 {
-  OLED_ShowString(0,2,"Simp:  0000 RPM");
-  OLED_ShowString(0,22," Err:  000.00 ");
-  OLED_ShowString(0,42," Deg:  0000.0");
+  OLED_Refresh_Gram();
+  //OLED_ShowString(0,2,"CPU Idle:   0000");
+  OLED_ShowString(4,-3," NanoStep v1.5");
+  for(int x=0;x<128;x++)OLED_DrawPoint(x,18, x&3);
+  OLED_Refresh_Gram();
+  OLED_ShowString(0,22,"Err:       0.00\"");
+  OLED_Refresh_Gram();
+  OLED_ShowString(0,42,"Deg:       0.00\"");
+  OLED_Refresh_Gram();
 }
-
-
-void ShowCalibrateScreen()
-{
-    OLED_Clear();  
-    OLED_ShowString(48,16,"NOT");
-    OLED_ShowString(16,32,"Calibrated");
-    OLED_ShowString(0,48,"Please Calibrate");
-}
-
-
-void ShowCalibrateOKScreen()
-{
-    OLED_ShowString(16,25,"Calibration");
-    OLED_ShowString(48,45,"OK!");
-}
-
-
-void ShowCalibrateCompleteScreen()
-{
-    OLED_Clear();
-    OLED_ShowString(0,16,"   Finished!  ");
-    OLED_ShowString(0,32,"  Please Press ");
-    OLED_ShowString(0,48,"Reset to Reboot");
-}
-
 
 void ShowBootloaderScreen()
 {
@@ -133,7 +145,7 @@ void BuildMenu()
   Menu_Register_Clear(OLED_Clear);
 
   Menu_Item_Init(&menuItemCalibrate);
-  menuItemCalibrate.title = "Calibrate";
+  menuItemCalibrate.title = "Reset Settings";
   menuItemCalibrate.type = MENU_ITEM_TYPE_ACTION;
   menuItemCalibrate.action = &CalibrateEncoder;
 
@@ -159,19 +171,16 @@ void BuildMenu()
   menuItemEnablePin.variable.value = &Motor_ENmode_flag;  
   menuItemEnablePin.variable.maxValue = 1;
 
-  Menu_Item_Init(&menuItemDirectionPin);
+/*  Menu_Item_Init(&menuItemDirectionPin);
   menuItemDirectionPin.title = "DIR Pin";
   menuItemDirectionPin.type = MENU_ITEM_TYPE_VARIABLE_UINT8;
   menuItemDirectionPin.variable.value = &Motor_Dir;
-  menuItemDirectionPin.variable.maxValue = 1;
+  menuItemDirectionPin.variable.maxValue = 1;*/
 
-  Menu_Item_Init(&menuItemClosedLoopMode);
-  menuItemClosedLoopMode.title = "Closed M";
-  menuItemClosedLoopMode.type = MENU_ITEM_TYPE_VARIABLE_UINT8;
-  menuItemClosedLoopMode.variable.value = &closemode;
-  menuItemClosedLoopMode.variable.maxValue = 1;
-  menuItemClosedLoopMode.variable.minValue = 0;
-  menuItemClosedLoopMode.variable.change = &Changer_ClosedLoopMode;   // Override the default value change function
+  Menu_Item_Init(&menuItemMag);
+  menuItemMag.title = "Mag.Field";
+  menuItemMag.type = MENU_ITEM_TYPE_ACTION;
+  menuItemMag.action = &magDisplay;
 
   Menu_Item_Init(&menuItemPID_P);
   menuItemPID_P.title = "PID P";
@@ -206,11 +215,11 @@ void BuildMenu()
 
   Menu_Init(&menuMain);
   Menu_Add_Item(&menuMain, &menuItemCalibrate);
+  Menu_Add_Item(&menuMain, &menuItemMag);
   Menu_Add_Item(&menuMain, &menuItemCurrent);
   Menu_Add_Item(&menuMain, &menuItemStepSize);
   Menu_Add_Item(&menuMain, &menuItemEnablePin);
-  Menu_Add_Item(&menuMain, &menuItemDirectionPin);
-  Menu_Add_Item(&menuMain, &menuItemClosedLoopMode);
+//  Menu_Add_Item(&menuMain, &menuItemDirectionPin);
   Menu_Add_Item(&menuMain, &menuItemPID_P);
   Menu_Add_Item(&menuMain, &menuItemPID_I);
   Menu_Add_Item(&menuMain, &menuItemPID_D);
@@ -221,150 +230,89 @@ void BuildMenu()
 }
 
 
-//
+//Always 2 digits after the point
+void ftoa_embedded(float data, char* buffer, size_t buffer_size, int16_t padding)
+{
+  buffer[0] = (data < 0) ? '-' : ' ';
+
+  data = fabs(data);
+  int tmpInt1 = data;
+  itoa(tmpInt1, buffer+1, 10);
+  //Now pad with spaces - shift to the end of designated area
+  int int_length = strlen(buffer);
+  if(int_length<padding)
+  {
+    for(int i=int_length-1;i>=0;i--)
+      buffer[i+padding-int_length] = buffer[i];
+    for(int i=0;i<padding-int_length;i++)
+      buffer[i] = ' ';
+  }
+
+  float fractional = data - tmpInt1;      // Get fraction (0.0123).
+  int tmpInt2 = trunc(fractional * 100);  // Turn into integer (123).
+
+  // Print fractional part, appending int part
+  snprintf (buffer+padding, buffer_size-padding, ".%02d", tmpInt2);
+}
+
+void wakeup()
+{
+  if(idle_cycles>=SCREENSAVER_DELAY)
+    ShowInfoScreen();//Restore screen content
+
+  idle_cycles = 0;
+}
+
 void Motor_data_dis(void)
 {
-    //uint8_t temp[17]={0};
-    uint8_t strRPM[6] = {0};
-    uint8_t strERR[8] = {0};
-    uint8_t strDEG[8] = {0};
+    // Switch LED on error. Do not limit angle error - it's harder to recover. 
+//    if((tim6Counter&255)==12)//We only update LED once per 256 cycles
+    if(pid_e > 3200 || pid_e < -3200)LED_H;else LED_L;
 
-    //int32_t deg_temp=0;
-    uint32_t e_temp=0;
-    static uint16_t e_a=0,e_b=0;
-    
-    if(Data_update_flag ==1 /*&& Menu_Num==1*/)
+
+    //uint8_t temp[17]={0};
+    if(!enmode)
     {
+      idle_cycles++;
+      if(idle_cycles==SCREENSAVER_DELAY)
+      {
+        //Enable screensaver
+        OLED_Clear();
+      };
+
+      if(idle_cycles>=SCREENSAVER_DELAY)
+        return;//Do not show anything else
+    }
+    else
+    {
+      wakeup();//We were in screensaver before - so show screen back, motor is enabled
+    }
+
+#ifdef DEBUG_CPU_LOAD    
+    char strRPM[20];// = {0};
+    snprintf(strRPM, 20, "%5ld", cpu_idle);
+    OLED_ShowString(48+8*5, 2, strRPM);
+#endif
+    char strERR[20] = {0};
+    char strDEG[20] = {0};
+
+//    static int32_t prev_pid_e = 0;
+    
+    //if(prev_pid_e != pid_e /*&& Menu_Num==1*/)
+        //prev_pid_e = pid_e;
         Data_update_flag=0;
 /*************SIMP*****************************************************/
-        Motor_speed = wap2-wap1;//
-        if(Motor_speed>=0)
-            //temp[8]=' ';
-            strRPM[0] = ' ';
-        else
-        {
-            //temp[8]='-';
-            strRPM[0] = '-';
-            Motor_speed = ~Motor_speed ;
-            Motor_speed+=1;
-        }
-        Motor_speed=Motor_speed*60;//
-       /* temp[0]=Motor_speed/1000;
-        temp[1]=Motor_speed%1000/100;
-        temp[2]=Motor_speed%100/10;
-        temp[3]=Motor_speed%10;
-        */
-        strRPM[1] = '0' + Motor_speed/1000;
-        strRPM[2] = '0' + Motor_speed%1000/100;
-        strRPM[3] = '0' + Motor_speed%100/10;
-        strRPM[4] = '0' + Motor_speed%10;
-/*************ERR*************************************************/
-        if(pid_e>=0)
-        {
-            //temp[4]=' ';
-            strERR[0] = ' ';
-            e_temp=pid_e;
-        }
-        else
-        {
-            //temp[4]='-';
-            strERR[0] = '-';
-            e_temp=-pid_e;
-        }
-        //e_temp=e_temp*0.021972*100;
-        e_temp=e_temp*2.1972f;          // JaSw: Changed to float (increases performance and flash memory use)  
-        e_a =e_temp/100;                   
-        e_b =e_temp%100;                    
-        //e_b =(e_temp -e_a) *100;        
-/*   
-        temp[5]=e_a/100;
-        temp[6]=e_a%100/10;
-        temp[7]=e_a%10;
-//        temp[8]='.';
-        temp[9]=e_b/10;
-        temp[10]=e_b%10;
-*/
-        strERR[1] = '0' + e_a/100;
-        strERR[2] = '0' + e_a%100/10;
-        strERR[3] = '0' + e_a%10;
-        strERR[4] = '.';
-        strERR[5] = '0' + e_b/10;
-        strERR[6] = '0' + e_b%10;
+//        Motor_speed = cpu_idle;//
+        //We do longer display CPU idle data, it's only needed for loop debug
 
-/*************Deg***************************************************/
-        if(yw>=0)
-        {
-            strDEG[0] = ' ';
-            e_temp= yw;
-        }
-        else
-        {
-            strDEG[0] = '-';
-            e_temp=-yw;
-        }
-        e_temp=e_temp*360*10/16384; //
-        if(e_temp>99999)
-        {
-            
-            strDEG[1] = 29;//M
-            strDEG[2] = 49;//a
-            strDEG[3] = 72;//x
-            strDEG[4] = ' ';
-            strDEG[5] = ' ';
-            strDEG[6] = ' ';
-            
-        }
-        else
-        {
-            e_a =e_temp/10;                    //
-            if(e_a>9999){
-                strDEG[1] = 29;//M
-                strDEG[2] = 49;//a
-                strDEG[3] = 72;//x
-                strDEG[4] = ' ';
-                strDEG[5] = ' ';
-                strDEG[6] = ' ';
-            }
-            else
-            {
-                e_b =e_temp%10;                    //
-                strDEG[1] = '0' + e_a/1000;
-                strDEG[2] = '0' + e_a%1000/100;
-                strDEG[3] = '0' + e_a%100/10;
-                strDEG[4] = '0' + e_a%10;
-                strDEG[5] = '.';
-                strDEG[6] = '0' + e_b%10;
-            }
-        }
-/**********显示*****************************************************/ 
-    /*    OLED_ShowChar( 48, 2, temp[8], 16, 1);
-        OLED_ShowChar( 56, 2, '0'+temp[0], 16, 1);
-        OLED_ShowChar( 64, 2, '0'+temp[1], 16, 1);
-        OLED_ShowChar( 72, 2, '0'+temp[2], 16, 1);
-        OLED_ShowChar( 80, 2, '0'+temp[3], 16, 1);
-        */
-        OLED_ShowString(48, 2, strRPM);
-    /*    
-        OLED_ShowChar( 48, 22, temp[4], 16, 1);
-        OLED_ShowChar( 56, 22, '0'+temp[5], 16, 1);
-        OLED_ShowChar( 64, 22, '0'+temp[6], 16, 1);
-        OLED_ShowChar( 72, 22, '0'+temp[7], 16, 1);
-//        OLED_ShowChar( 80, 22, temp[8], 16, 1);
-        OLED_ShowChar( 88, 22, '0'+temp[9], 16, 1);
-        OLED_ShowChar( 96, 22, '0'+temp[10], 16, 1);
-      */
-        OLED_ShowString(48, 22, strERR);
-/*
-        OLED_ShowChar( 48, 42, temp[12], 16, 1);
-        OLED_ShowChar( 56, 42, '0'+temp[13], 16, 1);
-        OLED_ShowChar( 64, 42, '0'+temp[14], 16, 1);
-        OLED_ShowChar( 72, 42, '0'+temp[15], 16, 1);
-        OLED_ShowChar( 80, 42, '0'+temp[16], 16, 1);
-        OLED_ShowChar( 88, 42, '0'+temp[17], 16, 1);
-        OLED_ShowChar( 96, 42, '0'+temp[11], 16, 1);
-        */
-       OLED_ShowString(48, 42, strDEG);
-    }
+
+       ftoa_embedded((pid_e*angle_conversion), strERR, 20, 4);
+       ftoa_embedded((yw*angle_conversion), strDEG, 20, 6);
+
+       OLED_ShowString(48+8*2, 22, strERR);
+       OLED_ShowString(48-8*0, 42, strDEG);
+
+       OLED_Refresh_Gram();
 }
 
 

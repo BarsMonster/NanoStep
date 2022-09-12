@@ -53,8 +53,10 @@ void OLED_SetDisplayClock(uint8_t val);
 void OLED_Fill(uint8_t x1,uint8_t y1,uint8_t x2,uint8_t y2,uint8_t dot);	
 void OLED_ShowChar(uint8_t x,uint8_t y,char chr,uint8_t size,uint8_t mode);	
 void OLED_ShowNum(uint8_t x,uint8_t y,uint32_t num,uint8_t len,uint8_t size);
-void OLED_ShowString(uint8_t x,uint8_t y,const char *p);	 		
-  
+void OLED_ShowString(uint8_t x,uint8_t y,const char *p);
+void OLED_ShowString_invert(uint8_t x,uint8_t y,const char *p);
+
+
 uint32_t oled_pow(uint8_t m,uint8_t n);
 //void OLED_Showword(uint8_t x,uint8_t y,uint8_t *num,uint8_t mode);
 

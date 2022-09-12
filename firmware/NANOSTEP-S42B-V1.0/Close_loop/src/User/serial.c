@@ -13,13 +13,19 @@ enum PARSE_STATE
     PARSE_STATE_MESSAGEID,
     PARSE_STATE_PAYLOAD,
     PARSE_STATE_CHECKSUM
-}parseState;
+} parseState;
 
 
 uint8_t pbIndex;
 uint8_t pBytes;
 uint8_t seqRead;
 uint8_t seqWrite;
+
+MSG_ERROR error;
+
+uint8_t parseBuffer[PACKET_LENGTH_MAX];     // Buffer used for parsing the received message
+uint8_t msgLength;                          // Length of the received message without preamble
+uint8_t packetBuffer[PACKET_LENGTH_MAX];    // Hold the last generated packet
 
 
 void VerifySequence()

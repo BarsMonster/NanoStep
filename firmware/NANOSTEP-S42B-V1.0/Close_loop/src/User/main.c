@@ -1,21 +1,13 @@
 /*
- * TrueStep Main
+ * NanoStep Main
  * 
  * This project has been forked from the original S42B firmware created by Vsion Yang.
  * 
  * Contributors:
+ * - Mikhail Svarichevsky (2022.08.22)
  * - Vsion Yang (2019.10.31)
  * - Jan Swanepoel
 */
-
-// JaSw: TODO
-// - A lot of cleaning up!!!
-// - Allow to change and store different serial baud rates
-// - See that serial commands does not interfere with motion
-// - Support for 0.9° steppers
-// - Check for unused pins and make them inputs with pullups
-// - Add open/close mode selection to OLED menu
-
 
 #include "main.h"
 #include "oled.h"
@@ -69,10 +61,6 @@ int16_t kp=30;                //
 int16_t ki=10;                //
 int16_t kd=250;               //
 
-
-const uint8_t LPFA=125; 
-const uint8_t LPFB=3;
-
 int32_t s=0;//
 int32_t s_1=0;
 int32_t s_sum=0;//
@@ -91,12 +79,15 @@ int32_t dterm=0;//
 int16_t u=0;//
 int32_t stepnumber=0;//
 uint8_t stepangle=0;//
+int32_t cpu_idle=0;//We are doing this to identify how far can we load CPU
+
+int32_t angle_prev;//Previous phase angle. We don't adwance more than 1/4 step per tick
 
 uint16_t hccount=0;//
 uint8_t closemode;//
 uint8_t enmode=0;//
 
-uint8_t Calibration_flag=0;             //
+volatile uint8_t Calibration_flag=0;             //
 volatile uint8_t Data_update_flag =1;   //
 volatile uint16_t Data_update_Count =0; //25ms
 
@@ -104,14 +95,11 @@ uint8_t Second_Calibrate_flag=0;        //
 int16_t Motor_speed =0;
 int16_t wap1=0;
 int16_t wap2=0;
-int16_t Motor_speed_count=0; 
-uint8_t start_measu_V_flag=0;
-uint8_t measure_once_flag=0; 
 
 uint8_t nodeId;                         // JaSw: Motor identification when used in network (CAN). FOR FUTURE USE.
-uint8_t menuActive = 0;                 // JaSw: In-menu = 1 else 0
-volatile uint32_t tickCount;            // JaSw: Used to count system ticks
-uint32_t prevLoopTickCount;
+volatile uint8_t menuActive = 0;                 // JaSw: In-menu = 1 else 0
+volatile uint32_t tickCount = 101;            // JaSw: Used to count system ticks
+uint32_t volatile prevLoopTickCount;
 volatile uint32_t tim6Counter;          // JaSw: Increases each time timer6 interrupts (100uS)
 uint32_t prevTim6Counter;
 bool SoftEnable = 0;                    // JaSw: Software motor enable
@@ -119,58 +107,63 @@ uint16_t softMoveStepCount;
 uint8_t softMoveDirection;
 uint8_t oledClock = 0x00;
 bool streamAngle;
-bool tuningMode;                        // JaSw: Indicates tuning mode, where some normal features are disabled
+bool tuningMode=false;                        // JaSw: Indicates tuning mode, where some normal features are disabled
 
 uint8_t Currents=0;                     //
 uint8_t Motor_Dir=0;                    //
-volatile uint8_t Motor_ENmode_flag=0;   //
+uint8_t Motor_ENmode_flag=0;   //
 
-uint16_t table1[15];                    //
-volatile uint8_t Reset_status_flag=0;                    
+volatile uint16_t table1[15];                    //
+//volatile uint8_t Reset_status_flag=0;                    
 
+void DisplayDebug(int debug_point, int value, int pause)
+{
+    char buffer[30];
+    snprintf(buffer, 30, "!%d!%d!    ", debug_point, value);
+    OLED_ShowString(2, 2, buffer);
+    OLED_Refresh_Gram();
+    LL_mDelay(pause);
+}
 
 int main(void)
-{
+{   
+    menuActive = 0;//Fix LTO initialization bug
+    
     LL_Init();
     SystemClock_Config();
     MX_GPIO_Init();   
-
     OLED_Init();
-    ShowStartupScreen();
 
     MX_SPI1_Init();
-    MX_TIM3_Init();
 
     TLE5012B_Init();
     Serial_Init();
 
     LL_mDelay(100);
 
-    FlashUnlock();
+    //FlashUnlock(); - we are not erasing.
     Calibration_flag = FlashReadHalfWord(Data_Store_Address);
-    FlashLock();
+    //FlashLock();
 
     // JaSw: Disable calibration check while testing code
     //Calibration_flag = 0xAA;
     
-    if(Calibration_flag == 0xAA)
-    {
-        ShowCalibrateOKScreen();
-        LL_mDelay(500);
-                                            
-        Reset_status_flag = 1;                                
 
+    if(Calibration_flag == 0xBB)
+    {
         // Read parameters                                                         
-        STMFLASH_Read(Data_Store_Address, table1, sizeof(table1)); 
+        STMFLASH_Read(Data_Store_Address, (uint16_t*)table1, sizeof(table1)); 
         
         // Check DIP switches
         // TODO: Maybe remove DIP switch options, can already
         // be set via OLED and serial. Will anyway be overriden.           
-        ReadDIPSwitches();
+        //ReadDIPSwitches();// - no longer needed
         //SetModeCheck();                 
         
         // Check encoder health.
         // TODO: Add message to OLED also
+        // TODO: CUrrently CheckHealth does not return anything useful
+        /*
         if (CheckHealth() == false)
           for(uint8_t m=0;m<10;m++)
           {
@@ -179,6 +172,7 @@ int main(void)
             LED_L;
             LL_mDelay(200);	
           } 
+        */
 
         // Apply parameters read from flash
         Currents = table1[1];
@@ -195,12 +189,10 @@ int main(void)
           closemode = 0;
         if(closemode == 1)
           PID_Cal_value_init();
+        //menuActive = 0;
     }
     else
     {   
-        ShowCalibrateScreen();
-        LL_mDelay(500);
-
         // Start with menu active to allow user to calibrate
         menuActive = 1;
     }
@@ -209,128 +201,91 @@ int main(void)
     
     NVIC_EnableIRQ(EXTI0_1_IRQn);                               //
     NVIC_EnableIRQ(EXTI2_3_IRQn);                               //
-    MX_USART1_UART_Init();                                      //USART Init
+    handle_en();
+    //MX_USART1_UART_Init();                                      //USART Init
 
-    MX_TIM1_Init();                                             //Tim1  Init
-    MX_TIM6_Init();                                             //Tim6  Init 
+    MX_TIM1_Init();                                             //Counter steps
+    MX_TIM3_Init();                                             //PWM
+    MX_TIM6_Init();                                             //Control loop
+    
     MX_IWDG_Init();                                             //Idog  Init
 
     OLED_Clear();
     BuildMenu(); 
     ShowInfoScreen();
+        
+    prevLoopTickCount = tickCount;
 
     // Main loop
+    //restart_init(); - we restart only when we detect EN signal
     while(1)
     { 	
 /**************************************************************/
 // Manage the reset of states between motor enable, to avoid sudden
 // movement if the motor moved while being disabled.  
-        if(Motor_ENmode_flag == 1)   //Motor_ENmode_flag is eindlik die variable wat die polarity van EN pin bepaal
-        {
-            if((ENIN==1) || (SoftEnable)) 
-            {                            
-                restart_init();    // Word, elke keer geroep maar net eerste keer uitgevoer. Reset TIM1, PID en enable motor                           
-            }
-            else
-            {
-                Reset_status_flag++;     //0++
-              //  Reset_status_flag = 1;
-            }
-        }
-        else if(Motor_ENmode_flag == 0)
-        {
-            if((ENIN==0) || (SoftEnable))
-            {
-                restart_init(); //               
-            }
-            else
-            {
-                Reset_status_flag++;     //0++
-            //    Reset_status_flag = 1;
-            }
-        }
-/*******************************************************************/
-// Hierdie lyk weer soos die deel van AAN na AF
-        if(Reset_status_flag == 1)
-        {       
-          enmode=0;
-          Reset_status_flag ++;           //1++
-          //  Reset_status_flag = 2;
+/*            if(!enmode && ((ENIN==Motor_ENmode_flag) || (SoftEnable))) 
+            {   
+                restart_init();                          
+            };
 
-          // Disable motor current output
-          WRITE_REG(TIM3->CCR1, 0);
-          WRITE_REG(TIM3->CCR2, 0);
-            
-          PID_Cal_value_init();           //
-                
-          wap1=0;
-          wap2=0;
+            if (enmode && ((ENIN != Motor_ENmode_flag) && (!SoftEnable)))
+            {
+              enmode = 0;
+              WRITE_REG(TIM3->CCR1, 0);
+              WRITE_REG(TIM3->CCR2, 0);
+            };*/
 
-          Data_update_flag=1;
-        }
-        else
-        {
-          if(Reset_status_flag>3)
-            Reset_status_flag--;
-        }
 
         // Check if bytes are available on UART1 for parsing
+        
         if (UART1_BytesToRead() > 0)
         {
           uint8_t data = UART1_Read();
           ParseBytes(data);
         }
+        
 
         // Handle OLED menu navigation
         OledMenu(); 
-        
-        // Motor live display is slow!
-        // Lower update rate to 10Hz and deactivate when streaming
-        if (tickCount > (prevLoopTickCount + 100))
-          if ((menuActive == 0) && (!tuningMode))
-          {
-            Motor_data_dis();
-            prevLoopTickCount = tickCount;
-          }
 
+        // Motor live display is slow! - it was slow because of screen refresh after each character :-D
+        // Lower update rate to 10Hz and deactivate when streaming
+        if (tickCount >= (prevLoopTickCount + 100))
+          if ((menuActive == 0))// && (!tuningMode))
+          {
+            prevLoopTickCount = tickCount;
+            Motor_data_dis();
+            cpu_idle = 0;//Cpu idle is for counting how many internal loops we do in 100ms
+          };
+
+/*
         if (streamAngle)
           StreamAngle();
 
         // So step teen 1ms tick counts, dalk meer akkuraat om op n timer se interrupt te sit later.
         //if (tickCount > prevLoopTickCount)
         if (tim6Counter != prevTim6Counter)
-          SoftMoveStep();                            
+          SoftMoveStep();                  */          
    
       prevTim6Counter = tim6Counter;
+      cpu_idle++;
     }
 }
 
 
-//Restart init 
-void restart_init(void)
-{
-  if(Reset_status_flag != 0)
-  {
-    LL_TIM_DisableCounter(TIM1);
 
-    // Reset the step counter (TIM1) and PID variables
-    LL_TIM_SetCounter(TIM1,0);                   
-    PID_Cal_value_init();           
-      
-    LL_TIM_EnableCounter(TIM1);
-  }
-  enmode=1;
-  Reset_status_flag=0;
-}
-
- 
 void OledMenu(void)
 {
   uint8_t key;
-  static uint32_t prevTickCount;
+  static uint32_t prevTickCount, prevKeyEvent;
 
-  if (!KeyScan(&key))
+  if (!KeyScan(&key) || (tickCount - prevKeyEvent) < 150)//return if key was pressed too recently
     return;
+  
+  
+  wakeup();//key pressed - no longer idle
+
+  prevKeyEvent = tickCount;
 
   
   if ((key & KEY_PRESSED_SELECT) > 0)     // lower button
@@ -339,22 +294,27 @@ void OledMenu(void)
     {
       Menu_Button_Down(&menuMain);
       Menu_Show(&menuMain);
+      OLED_Refresh_Gram();
     }
   }
 
   if ((key & KEY_PRESSED_BACK) > 0)
   {
     // Slow down the rate at which this key can be used
-    if ((tickCount - prevTickCount) > 250)
+    if ((tickCount - prevTickCount) > 150)
     {
       if (menuActive == 0)
       {
         menuActive = 1;
         OLED_Clear();
         Menu_Show(&menuMain);
+        OLED_Refresh_Gram();
       }
       else
+      {
         Menu_Select_Edit(&menuMain);
+        OLED_Refresh_Gram();
+      }
     }    
   }
 
@@ -364,6 +324,7 @@ void OledMenu(void)
     {
       Menu_Button_Up(&menuMain);
       Menu_Show(&menuMain);
+      OLED_Refresh_Gram();
     }
   }
 
@@ -380,7 +341,7 @@ void InvokeBootloader()
   // Function pointer to bootloader in system memory
   // Referenced from AN2606 Rev.44 Table 141. 
   // The first word is the stack pointer and therefore the 4 byte offset.
-  void (*BootMemJump)(void) = (*((uint32_t*) 0x1FFFEC04));
+  void (*BootMemJump)(void) = (void*)(*((uint32_t*) 0x1FFFEC04));
 
   // De-initialize UART1 as it will be used by the bootloader
   LL_USART_DeInit(USART1);
@@ -424,23 +385,23 @@ void ParseBytes(uint8_t data)
           status.statusBitField |= Motor_ENmode_flag << SERIAL_MSG_STATUS_ENABLED;
           status.statusBitField |= enmode << SERIAL_MSG_STATUS_MODE;
 
-          uint16_t len = Serial_GeneratePacket(SERIAL_MSG_ANGLE, &status, sizeof(status));
+          uint16_t len = Serial_GeneratePacket(SERIAL_MSG_ANGLE, (unsigned char*)&status, sizeof(status));
           UART1_Write(packetBuffer, len);
         }
         if (parseBuffer[2] == SERIAL_MSG_READVALUE_SOURCE_ANGLE)
         {
           struct Serial_Msg_Angle aa;
-          aa.angle = ReadAngle() * 0.021972f;
+          aa.angle = ReadAngle() * angle_conversion;
 
-          uint16_t len = Serial_GeneratePacket(SERIAL_MSG_ANGLE, &aa, sizeof(aa));
+          uint16_t len = Serial_GeneratePacket(SERIAL_MSG_ANGLE, (unsigned char*)&aa, sizeof(aa));
           UART1_Write(packetBuffer, len);
         }
         if (parseBuffer[2] == SERIAL_MSG_READVALUE_SOURCE_ANGERROR)
         {
           struct Serial_Msg_AngleError ae;
-          ae.error = pid_e * 0.021972;
+          ae.error = pid_e * angle_conversion;
 
-          uint16_t len = Serial_GeneratePacket(SERIAL_MSG_ANGERROR, &ae, sizeof(ae));
+          uint16_t len = Serial_GeneratePacket(SERIAL_MSG_ANGERROR, (unsigned char*)&ae, sizeof(ae));
           UART1_Write(packetBuffer, len);
         }
       break;
@@ -449,17 +410,17 @@ void ParseBytes(uint8_t data)
       {
         uint8_t len = 0;
         if (parseBuffer[2] == SERIAL_MSG_PARAM_SOURCE_KP)
-          len = Serial_GeneratePacket(SERIAL_MSG_PARAM_KP, &kp, 2);
+          len = Serial_GeneratePacket(SERIAL_MSG_PARAM_KP, (unsigned char*)&kp, 2);
         else if (parseBuffer[2] == SERIAL_MSG_PARAM_SOURCE_KI)
-          len = Serial_GeneratePacket(SERIAL_MSG_PARAM_KI, &ki, 2);
+          len = Serial_GeneratePacket(SERIAL_MSG_PARAM_KI, (unsigned char*)&ki, 2);
         else if (parseBuffer[2] == SERIAL_MSG_PARAM_SOURCE_KD)
-          len = Serial_GeneratePacket(SERIAL_MSG_PARAM_KD, &kd, 2);
+          len = Serial_GeneratePacket(SERIAL_MSG_PARAM_KD, (unsigned char*)&kd, 2);
         else if (parseBuffer[2] == SERIAL_MSG_PARAM_SOURCE_CURRENT)
           len = Serial_GeneratePacket(SERIAL_MSG_PARAM_CURRENT, &Currents, 1);
         else if (parseBuffer[2] == SERIAL_MSG_PARAM_SOURCE_STEPSIZE)
           len = Serial_GeneratePacket(SERIAL_MSG_PARAM_STEPSIZE, &stepangle, 1);
         else if (parseBuffer[2] == SERIAL_MSG_PARAM_SOURCE_ENDIR)
-          len = Serial_GeneratePacket(SERIAL_MSG_PARAM_ENDIR, &Motor_ENmode_flag, 1);
+          len = Serial_GeneratePacket(SERIAL_MSG_PARAM_ENDIR, (unsigned char*)&Motor_ENmode_flag, 1);
         else if (parseBuffer[2] == SERIAL_MSG_PARAM_SOURCE_MOTORDIR) 
           len = Serial_GeneratePacket(SERIAL_MSG_PARAM_MOTORDIR, &Motor_Dir, 1);
         else
@@ -623,9 +584,9 @@ void SoftMoveStep()
 static void LL_Init(void)
 {
   LL_APB1_GRP2_EnableClock(LL_APB1_GRP2_PERIPH_SYSCFG);
-  NVIC_SetPriority(SVC_IRQn, 0);
-  NVIC_SetPriority(PendSV_IRQn, 0);
-  NVIC_SetPriority(SysTick_IRQn, 0);
+  NVIC_SetPriority(SVC_IRQn, 5);
+  NVIC_SetPriority(PendSV_IRQn, 5);
+  NVIC_SetPriority(SysTick_IRQn, 5);
 }
 
 
@@ -663,14 +624,13 @@ void SystemClock_Config(void)
   SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;                  // Enable SysTick interrupt
   LL_SetSystemCoreClock(48000000);
   LL_RCC_SetUSARTClockSource(LL_RCC_USART1_CLKSOURCE_PCLK1);
-  NVIC_SetPriority(SysTick_IRQn, 0);
-
-  
+  NVIC_SetPriority(SysTick_IRQn, 5);//SysTick priority is low, we don't need precision there  
 }
 
 
 static void MX_IWDG_Init(void)
 {
+  //Temporary disable DOG to enable debugging
   // WDG Timer counts down from reload value
   // Setting window to 4095 disables window mode.
   // Clock is 40kHz (25us) with a prescaler of 256 it would
@@ -768,7 +728,7 @@ static void MX_TIM1_Init(void)
   TIM_InitStruct.RepetitionCounter = 0;
   LL_TIM_Init(TIM1, &TIM_InitStruct);
   LL_TIM_DisableARRPreload(TIM1);
-  LL_TIM_ConfigETR(TIM1, LL_TIM_ETR_POLARITY_NONINVERTED, LL_TIM_ETR_PRESCALER_DIV1, LL_TIM_ETR_FILTER_FDIV4_N8);
+  LL_TIM_ConfigETR(TIM1, LL_TIM_ETR_POLARITY_NONINVERTED, LL_TIM_ETR_PRESCALER_DIV1, LL_TIM_ETR_FILTER_FDIV1);//LL_TIM_ETR_FILTER_FDIV4_N8); - no filtering
   LL_TIM_SetClockSource(TIM1, LL_TIM_CLOCKSOURCE_EXT_MODE2);
   LL_TIM_SetTriggerOutput(TIM1, LL_TIM_TRGO_RESET);
   LL_TIM_DisableMasterSlaveMode(TIM1);
@@ -854,7 +814,10 @@ static void MX_TIM6_Init(void)
 
   TIM_InitStruct.Prescaler = 0;
   TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_UP;
-  TIM_InitStruct.Autoreload = 4800;//
+  //1600 is 30kHz main loop
+  //1300 is fastest that still works at 50kHz step pulses with some reserve for display
+  //1000 - rare display updates, no skipped steps. 
+  TIM_InitStruct.Autoreload = 1600;//1600;//Original is 4800. 1200 gives 40kHz. 600 almost stops display program. 1200 slows it down significantly. 1800 is 26kHz.
   LL_TIM_Init(TIM6, &TIM_InitStruct);
 
   LL_TIM_DisableARRPreload(TIM6);
@@ -976,10 +939,18 @@ static void MX_GPIO_Init(void)
   LL_SYSCFG_SetEXTISource(LL_SYSCFG_EXTI_PORTB, LL_SYSCFG_EXTI_LINE1);
   LL_SYSCFG_SetEXTISource(LL_SYSCFG_EXTI_PORTB, LL_SYSCFG_EXTI_LINE2);
   
-  LL_GPIO_SetPinPull(DIRIN_GPIO_Port, DIRIN_Pin, LL_GPIO_PULL_NO);//
-  LL_GPIO_SetPinPull(ENIN_GPIO_Port, ENIN_Pin, LL_GPIO_PULL_UP);//
+  LL_GPIO_SetPinPull(DIRIN_GPIO_Port, DIRIN_Pin, LL_GPIO_PULL_NO);
   LL_GPIO_SetPinMode(DIRIN_GPIO_Port, DIRIN_Pin, LL_GPIO_MODE_INPUT);
+
+  /*GPIO_InitStruct.Pin = DIRIN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  LL_GPIO_Init(DIRIN_GPIO_Port, &GPIO_InitStruct);*/
+
+  LL_GPIO_SetPinPull(ENIN_GPIO_Port, ENIN_Pin, LL_GPIO_PULL_UP);//
   LL_GPIO_SetPinMode(ENIN_GPIO_Port, ENIN_Pin, LL_GPIO_MODE_INPUT);
+  
+
 
   EXTI_InitStruct.Line_0_31 = LL_EXTI_LINE_1;
   EXTI_InitStruct.LineCommand = ENABLE;
@@ -987,16 +958,16 @@ static void MX_GPIO_Init(void)
   EXTI_InitStruct.Trigger = LL_EXTI_TRIGGER_RISING_FALLING;
   LL_EXTI_Init(&EXTI_InitStruct);
 
-//  EXTI_InitStruct.Line_0_31 = LL_EXTI_LINE_2;
-//  EXTI_InitStruct.LineCommand = ENABLE;
-//  EXTI_InitStruct.Mode = LL_EXTI_MODE_IT;
-//  EXTI_InitStruct.Trigger = LL_EXTI_TRIGGER_RISING_FALLING;
-//  LL_EXTI_Init(&EXTI_InitStruct);
+  EXTI_InitStruct.Line_0_31 = LL_EXTI_LINE_2;
+  EXTI_InitStruct.LineCommand = ENABLE;
+  EXTI_InitStruct.Mode = LL_EXTI_MODE_IT;
+  EXTI_InitStruct.Trigger = LL_EXTI_TRIGGER_RISING_FALLING;
+  LL_EXTI_Init(&EXTI_InitStruct);
 
-  NVIC_SetPriority(EXTI0_1_IRQn, 0);
+  NVIC_SetPriority(EXTI0_1_IRQn, 0);//Highest priority to dir pin
   NVIC_DisableIRQ(EXTI0_1_IRQn);
-//  NVIC_SetPriority(EXTI2_3_IRQn, 1);
-//  NVIC_DisableIRQ(EXTI2_3_IRQn);
+  NVIC_SetPriority(EXTI2_3_IRQn, 1);
+  NVIC_DisableIRQ(EXTI2_3_IRQn);
 }
 
 
@@ -1036,75 +1007,6 @@ void ReadDIPSwitches()
 
 void SetModeCheck(void)
 {
-  // WriteValue(WRITE_MOD2_VALUE,MOD2_VALUE);
-  
-  // // Read status register
-  // uint16_t state = ReadState();
-  // // Check for Magnitude out of limit error
-  // if(state&0x0080)
-  // {
-  //   for(uint8_t m=0;m<10;m++)
-  //   {
-  //     LED_H;
-	//     LL_mDelay(200);
-	//     LED_L;
-	//     LL_mDelay(200);	
-  //   } 
-  // }
-
-//   if(Calibration_flag != 0xAA)
-//   {
-// loop: if(CAL==0)
-//         CalibrateEncoder();
-        
-//         if(1 != Second_Calibrate_flag){
-//           if((SET1==1)&&(SET2==1))//
-//             stepangle=16;//
-//           else if((SET1==0)&&(SET2==1))
-//             stepangle=8;//
-//           else if((SET1==1)&&(SET2==0))
-//             stepangle=4;//
-//           else
-//             stepangle=2;//
-//         }
-//     }
-//     else if(Calibration_flag == 0xAA && Second_Calibrate_flag ==1)
-//     {
-// //      Second_Calibrate_flag=0;
-//       goto loop;
-//     }
-
-    // if(CLOSE==0 )//|| Motor_mode==0
-    // {//
-    //     closemode=1;
-    // #if 1       
-    //     r=*(volatile uint16_t*)((ReadValue(READ_ANGLE_VALUE)>>1)*2+0x08008000); 
-    //     s_sum=r;   //
-    //     y=r;
-    //     y_1=y;
-    //     yw=y;  
-    //     yw_1=yw;
-    // #endif
-    // }
-    // else
-    // {
-    //     closemode=0;
-    // }
-
-    // if(CalibrateEncoder_finish_flag ==1)
-    // {   
-    //     CalibrateEncoder_finish_flag=0; 
-    //     Second_Calibrate_flag=0;
-    //     Prompt_show();               //
-    //     for(;;){
-    //         LED_F;
-    //         LL_mDelay(200);
-    //     }
-    // }
-//    else{
-//        NVIC_EnableIRQ(EXTI0_1_IRQn);
-//        NVIC_EnableIRQ(EXTI2_3_IRQn);
-//    }
 }
 
 
@@ -1134,12 +1036,11 @@ void Output(int32_t theta, uint8_t effort)
   int16_t angle_1;
   int16_t angle_2;
 		
-  float phase_multiplier = 12.5f;                     // Multiply theta by 12.5 Not really sure what the purpose of this is?
+  //We multiply phase outside, so no float math
+  //float phase_multiplier = 12.5f;                     // Multiply theta by 12.5 Not really sure what the purpose of this is?
                                                       
-  angle_1 = Mod(phase_multiplier * theta, 4096);
-  angle_2 = angle_1 + 1024;                           // Sin to Cos conversion (1024 = 90°)
-  if(angle_2 > 4096)
-    angle_2 -= 4096;
+  angle_1 = theta & 4095;//Mod(/*phase_multiplier */theta, 4096);
+  angle_2 = (angle_1 + 1024) & 4095;                           // Sin to Cos conversion (1024 = 90°)
 
   sin_coil_A = sin_1[angle_1];
   sin_coil_B = sin_1[angle_2];
@@ -1242,161 +1143,8 @@ int16_t Mod(int32_t xMod,int16_t mMod)
            
 void CalibrateEncoder(void) 
 {   
-  int32_t encoderReading=0;    
-  int32_t currentencoderReading=0;
-  int32_t lastencoderReading=0;        
-
-  int32_t iStart=0;    
-  int32_t jStart=0;
-  int32_t stepNo=0;
-  
-  int32_t fullStepReadings[200];//
-  int32_t ticks=0;	
-  uint32_t address=0x08008000;//
-
-  uint16_t lookupAngle;
-		
-  // Disable DIR en EN interrupts while calibrating, to be tested still...  
-  //enmode=0;
-  //NVIC_DisableIRQ(EXTI0_1_IRQn);
-  //NVIC_DisableIRQ(EXTI2_3_IRQn);
-                                                              
-  dir=1; 
-  Output(0,80);
-  for(uint8_t m=0;m<4;m++)
-  {
-    LED_H;
-	  LL_mDelay(250);
-    LED_L;
-	  LL_mDelay(250);	
-  }
-  // 200 steps 
-  for(int16_t x=0;x<=199;x++)//
-  {    
-    encoderReading=0;
-   	LL_mDelay(20);                     
-    lastencoderReading = ReadAngle();
-    // Take 10 readings and then average them     
-    for(uint8_t reading=0; reading < 10; reading++) 
-	  { 
-      currentencoderReading = ReadAngle(); 
-      if(currentencoderReading - lastencoderReading < -8192)
-        currentencoderReading += 16384;
-      else if(currentencoderReading - lastencoderReading > 8192)
-        currentencoderReading -= 16384;
- 
-      encoderReading += currentencoderReading;
-      LL_mDelay(10);
-      lastencoderReading = currentencoderReading;
-    }
-    encoderReading = encoderReading / 10;
-
-    if(encoderReading > 16384)
-      encoderReading -= 16384;
-    else if(encoderReading < 0)
-      encoderReading += 16384;
-
-    // Store the encoder reading  
-    fullStepReadings[x] = encoderReading;  
-
-    OneStep();
-	  LL_mDelay(100); 
-  }
-  dir=0; 
-  OneStep();
-  LL_mDelay(1000); 
-  for(int16_t x=199;x>=0;x--)//
-  {    
-    encoderReading=0;
-   	LL_mDelay(20);                     
-    lastencoderReading=ReadAngle();     
-    for(uint8_t reading=0;reading<10;reading++) 
-	  { 
-      currentencoderReading=ReadAngle(); 
-      if(currentencoderReading-lastencoderReading<-8192)
-        currentencoderReading+=16384;
-      else if(currentencoderReading-lastencoderReading>8192)
-        currentencoderReading-=16384;
- 
-      encoderReading+=currentencoderReading;
-      LL_mDelay(10);
-      lastencoderReading=currentencoderReading;
-    }
-    encoderReading=encoderReading/10;
-    if(encoderReading>16384)
-      encoderReading-=16384;
-    else if(encoderReading<0)
-      encoderReading+=16384;
-
-    // Average current samples with previous samples  
-    fullStepReadings[x]=(fullStepReadings[x]+encoderReading)/2;  
-    OneStep();
-	LL_mDelay(100); 
-  }
-
-  LL_TIM_OC_SetCompareCH1(TIM3,0);  
-  LL_TIM_OC_SetCompareCH2(TIM3,0); 
-
-  for(uint8_t i=0;i<200;i++)//
-  {
-    ticks=fullStepReadings[(i+1)%200]-fullStepReadings[i%200];
-    if(ticks<-15000) 
-      ticks+=16384;
-    else if(ticks>15000)	
-	  ticks-=16384;	
-
-    for(int32_t j=0;j<ticks;j++) 
-	  {
-      stepNo=(fullStepReadings[i]+j)%16384;
-      if(stepNo==0) 
-      {
-        iStart=i;
-        jStart=j;
-      }
-    }
-  }
-
-  FlashUnlock();
-  FlashErase32K();
-
-  for(int32_t i=iStart;i<(iStart+200+1);i++)//
-  {
-	  ticks=fullStepReadings[(i+1)%200]-fullStepReadings[i%200];
-    if(ticks<-15000) 
-      ticks+=16384;         
-    if(i==iStart) 
-	  { 
-      for(int32_t j=jStart;j<ticks;j++) 
-	    {
-        lookupAngle=(8192*i+8192*j/ticks)%1638400/100;
-		    FlashWriteHalfWord(address,(uint16_t)lookupAngle);
-		    address+=2;
-      }
-    }
-    else if(i==(iStart+200)) 
-	  { 
-      for(int32_t j=0;j<jStart;j++) 
-	    {
-        lookupAngle=((8192*i+8192*j/ticks)%1638400)/100;
-		    FlashWriteHalfWord(address,(uint16_t)lookupAngle);
-		    address+=2;
-      }
-    }
-    else 
-	  {                        //this is the general case
-      for(int32_t j=0;j<ticks;j++) 
-      {
-        lookupAngle=((8192*i+8192*j/ticks)%1638400)/100;
-		    FlashWriteHalfWord(address,(uint16_t)lookupAngle);
-		    address+=2;
-      }
-    }
-  }
-  FlashLock();
-
-
   // Set default values
-  table1[0] =0xAA;                
+  table1[0] =0xBB;                
   table1[1] =128;
   table1[2] =16;
   table1[3] =4;
@@ -1408,21 +1156,16 @@ void CalibrateEncoder(void)
   table1[11]=kp;                  
   table1[12]=ki;
   table1[13]=kd;
-  table1[14]=closemode;
+  table1[14]=1;//Always closed loop mode
 
-  Calibration_flag = 0xAA;    
-  STMFLASH_Write(Data_Store_Address,table1,sizeof(table1));
-  
-  
-  //NVIC_EnableIRQ(EXTI0_1_IRQn);
-  //NVIC_EnableIRQ(EXTI2_3_IRQn);
-
-  //CalibrateEncoder_finish_flag=1; //  
+  Calibration_flag = 0xBB;    
+  STMFLASH_Write(Data_Store_Address,(uint16_t*)table1,sizeof(table1));
 
   // Display calibration complete and wait for user restart.
   // TODO: Why restart, maybe auto reload/restart
-  ShowCalibrateCompleteScreen();
-  for(;;)
+  HAL_NVIC_SystemReset();//Reset
+
+  for(;;)//We never reach here
   {
     LED_F;
     LL_mDelay(200);
@@ -1436,7 +1179,6 @@ void ChangeOLEDClock()
 {
   OLED_SetDisplayClock(oledClock);
 }
-
 
 void PID_Cal_value_init(void)
 {
@@ -1452,17 +1194,18 @@ void PID_Cal_value_init(void)
     pid_e   = 0;
     u       = 0;
     dterm   = 0;
+    iterm   = 0;
     wrap_count=0;
-    //LL_TIM_SetCounter(TIM1,0);
-    WRITE_REG(TIM1->CNT, 0);
-    
-    r=*(volatile uint16_t*)((ReadValue(READ_ANGLE_VALUE)>>1)*2+0x08008000); //
-    s_sum=r;   //
-    y=r;
-    y_1=y;
-    yw=y;  
-    yw_1=yw;
-    
+
+    // Reset the step counter (TIM1) and PID variables - to the value where there is no sudden jump
+    LL_mDelay(1);//Wait while energised motor position is stable
+    int32_t initial_angle = ReadValue(READ_ANGLE_VALUE);
+    //if(LL_TIM_GetCounterMode(TIM1)==LL_TIM_COUNTERMODE_UP)
+    WRITE_REG(TIM1->CNT, initial_angle/stepangle);
+//      WRITE_REG(TIM1->CNT, (32768-initial_angle)/stepangle);
+    s_1 = initial_angle/stepangle;
+    y_1 = initial_angle;//make sure there is no wrapping jump at the beginning
+    r = s_sum + initial_angle/stepangle*stepangle;
 }
 
 

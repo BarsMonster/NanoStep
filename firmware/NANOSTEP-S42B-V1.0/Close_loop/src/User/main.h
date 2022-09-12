@@ -19,8 +19,14 @@
 #include "math.h"
 #include "stdio.h"
 #include "stdbool.h"
+#include "stm32f0xx_it.h"
 
 
+#define min(a,b) ((a)<(b)?(a):(b))
+#define max(a,b) ((a)>(b)?(a):(b))
+#define limitabs(a,b) ((a>0)?(min(a,b)):(max(a,-b)))
+#define sign(a) ((a>0)?1:((a<0)?-1:0))
+//#define minabs(a,b) ((a>0)?(max(a,b)):(min(a,-b)))
 
 //#define MISO_Pin LL_GPIO_PIN_6
 //#define MISO_GPIO_Port GPIOA
@@ -141,14 +147,11 @@
 #define UMAXOP   160        // Open loop maximum current, this translate to (3.3V / 256) * 160 = 2V on the Vref pin
 #define UMAXSUM  25600      //
 
+#define angle_conversion 360.0f/32768.0f
 
 extern int16_t kp;     
 extern int16_t ki;
 extern int16_t kd;
-
-extern const uint8_t LPFA; 
-extern const uint8_t LPFB;
-
 
 extern int32_t s;
 extern int32_t s_1;
@@ -168,8 +171,10 @@ extern int32_t dterm;
 extern int16_t u;     
 extern int32_t stepnumber;              // Used in OneStep() function
 extern uint8_t stepangle;
+extern int32_t angle_prev;
+extern int32_t cpu_idle;
 
-extern uint8_t menuActive;           // JaSw: In-menu = 1 else 0
+extern volatile uint8_t menuActive;           // JaSw: In-menu = 1 else 0
 extern volatile uint32_t tickCount;     // JaSw: Counts ticks
 extern volatile uint32_t tim6Counter;   // JaSw: Counts timer 6 interrupts
 extern bool tuningMode;
@@ -198,16 +203,14 @@ extern volatile uint16_t Data_update_Count;
 // extern uint8_t Menu_Num4_item;        //
 // extern uint8_t Menu_Num5_item;        // 
 // extern uint8_t Menu_Num6_item;        // 
-extern uint8_t Calibration_flag;      //
+extern volatile uint8_t Calibration_flag;      //
 extern int16_t Motor_speed ;
-extern int16_t wap1;
-extern int16_t wap2;
 extern int16_t Motor_speed_count;
 extern uint8_t start_measu_V_flag;
 extern uint8_t measure_once_flag;
 
 //extern volatile uint8_t flash_store_flag;
-extern uint16_t table1[15];                    //
+extern volatile uint16_t table1[15];                    //
 
 //extern uint8_t Rx1_buff[8];
 //extern uint8_t Receive_Count;
@@ -225,7 +228,7 @@ extern uint16_t table1[15];                    //
 extern uint8_t Motor_Dir;                  //
 extern uint8_t Motor_Enable;               //
 //extern uint8_t Motor_mode;              //
-extern volatile uint8_t Motor_ENmode_flag; //
+extern  uint8_t Motor_ENmode_flag; //
 //extern volatile uint8_t enter1_once_flag ;    //
 //extern volatile uint8_t enter2_once_flag ;
 //extern volatile uint8_t dir1_once_flag ;      //
@@ -239,7 +242,46 @@ void ChangeOLEDClock();
 extern void Output(int32_t theta,uint8_t effort);
 extern uint16_t ReadValue(uint16_t RegValue);
 extern uint16_t ReadAngle(void);
+extern void PID_Cal_value_init(void);
 
+//To minimize latency - it is inline
+static inline void restart_init(void)
+{
+  enmode = 1;
+  // Allow to init while control loop is disabled
+  LL_TIM_DisableCounter(TIM1);
+  LL_TIM_DisableCounter(TIM6); // Control loop
+  PID_Cal_value_init();
+  LL_TIM_EnableCounter(TIM6);
+  LL_TIM_EnableCounter(TIM3);
+  LL_TIM_EnableCounter(TIM1);
+}
+
+// Verify if we are enabled/disabled in the beginning, as we only check that in interrupts during normal work
+static inline void handle_en(void)
+{
+  if (!enmode && ((ENIN == Motor_ENmode_flag))) // || (SoftEnable)))
+  {
+    rampup_current = 0;
+    restart_init();
+  };
+
+  if (enmode && ((ENIN != Motor_ENmode_flag))) // && (!SoftEnable)))
+  {
+    enmode = 0;
+    pid_e = 0;//Do not display error when motor is disabled
+
+    // Disable motor current output
+    WRITE_REG(TIM3->CCR1, 0);
+    WRITE_REG(TIM3->CCR2, 0);
+
+    //Disable bridge
+    IN1_LOW;  
+    IN2_LOW;  
+    IN3_LOW;  
+    IN4_LOW;  
+  };
+}
 
 #ifdef __cplusplus
  extern "C" {

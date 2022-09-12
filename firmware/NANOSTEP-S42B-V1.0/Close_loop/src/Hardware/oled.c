@@ -87,8 +87,9 @@ void OLED_DrawPoint(uint8_t x,uint8_t y,uint8_t t)
 {
 	uint8_t pos,bx,temp=0;
 	if(x>127||y>63)return;
-	pos=7-y/8;		
-	bx=y%8;			
+	
+	pos=7-(y>>3);		
+	bx=y&7;			
 	temp=1<<(7-bx);	
 	if(t)OLED_GRAM[x][pos]|=temp;
 	else OLED_GRAM[x][pos]&=~temp;	    
@@ -106,29 +107,29 @@ void OLED_Fill(uint8_t x1,uint8_t y1,uint8_t x2,uint8_t y2,uint8_t dot)
 
 void OLED_ShowChar(uint8_t x,uint8_t y,char chr,uint8_t size,uint8_t mode)
 {      			    
-	uint8_t temp,t,t1;
-	uint8_t y0=y;
+	uint8_t t,t1;
 	chr=chr-' ';			   
-    for(t=0;t<size;t++)
+    for(t=0;t<size;t+=2)
     {   
-		if(size==16)//temp=oled_asc2_1206[chr][t];  
-		//else
-		 temp=oled_asc2_1608[chr][t];		                           
+		uint8_t b1=oled_asc2_1608[(int)chr][t];
+		uint8_t b2=oled_asc2_1608[(int)chr][t+1];
+
+
         for(t1=0;t1<8;t1++)
 		{
-			if(temp&0x80)OLED_DrawPoint(x,y,mode);
-			else OLED_DrawPoint(x,y,!mode);
-			temp<<=1;
-			y++;
-			if((y-y0)==size)
-			{
-				y=y0;
-				x++;
-				break;
-			}
-		}  	 
+			if(b1&(1<<t1))
+				OLED_DrawPoint(x,y+7-t1,mode);
+			else 
+				OLED_DrawPoint(x,y+7-t1,!mode);
+
+			if(b2&(1<<t1))
+				OLED_DrawPoint(x,y+7-t1+8,mode);
+			else 
+				OLED_DrawPoint(x,y+7-t1+8,!mode);
+		}
+		x++;
     } 
-	OLED_Refresh_Gram();	
+	//OLED_Refresh_Gram();- Do not update display after each character
 }
 
 uint32_t oled_pow(uint8_t m,uint8_t n)
@@ -163,7 +164,7 @@ void OLED_ShowNum(uint8_t x,uint8_t y,uint32_t num,uint8_t len,uint8_t size)
 } 
 
 
-void OLED_ShowString(uint8_t x,uint8_t y,const char *p)
+static inline void OLED_ShowString_generic(uint8_t x,uint8_t y,const char *p, uint8_t invert)
 {
 #define MAX_CHAR_POSX 120
 #define MAX_CHAR_POSY 58
@@ -172,61 +173,32 @@ void OLED_ShowString(uint8_t x,uint8_t y,const char *p)
     {       
         if(x > MAX_CHAR_POSX)
 		{ 
-			x=0;
-			y+=16;
+			return;//Do not wrap text
+			/*x=0;
+			y+=16;*/
 		}
-        if(y > MAX_CHAR_POSY)
+        /*if(y > MAX_CHAR_POSY)
 		{
 			y=x=0;
 			//OLED_Clear();
 			break;				// JaSw: Limit to a single page of text
-		}
-        OLED_ShowChar(x,y,*p,16,1);	 
+			//We allow to go beyond limits. It will be filtered on pixel drawing
+		}*/
+        OLED_ShowChar(x,y,*p,16,1-invert);	 
         x+=8;
         p++;
     }  
 }	   
 
-
-/*
-void OLED_Showword(uint8_t x,uint8_t y,uint8_t *num,uint8_t mode)
+void OLED_ShowString(uint8_t x,uint8_t y,const char *p)
 {
-	uint8_t t,t1,t2;
-	uint8_t temp;
-	uint8_t y0=y;
-//	t=*num;
-	for(t=0;t<50;t++)	
-	{
-		if((*num==word[t].Index[0])&&(*(num+1)==word[t].Index[1]))//
-		{
-			for(t1=0;t1<32;t1++)		//
-			{
-				temp=word[t].Msk[t1];
-				for(t2=0;t2<8;t2++)	//
-				{
-					if(temp&0x80)			//
-						OLED_DrawPoint(x,y,1);
-					else
-						OLED_DrawPoint(x,y,0);
-					temp<<=1;
-					y++	;				//
-//					if(y>=127) {return ;}		//
-					if((y-y0)==16)		//
-					{
-						y=y0;
-						x++;			
-						if(x>=127) return;	
-						break;				
-					}
-				}
-			}//
-		
-		}
-	}	
-		OLED_Refresh_Gram();
-}
-*/
+	OLED_ShowString_generic(x,y,p,0);
+}	   
 
+void OLED_ShowString_invert(uint8_t x,uint8_t y,const char *p)
+{
+	OLED_ShowString_generic(x,y,p,1);
+}	   
 
 void SPI2_Init()
 {

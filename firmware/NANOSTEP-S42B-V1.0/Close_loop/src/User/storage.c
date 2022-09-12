@@ -1,4 +1,8 @@
 #include "storage.h"
+#include "main.h"
+//#include "display.h"
+extern void ExitMenu();
+
 
 uint16_t STMFLASH_BUF[STM_SECTOR_SIZE/2];
 
@@ -90,7 +94,7 @@ void StoreCurrentParameters()
 {
   LED_H;
 
-  table1[0]   = 0xAA;                 
+  table1[0]   = 0xBB;                 
   table1[1]   = Currents;
   //table1[2]   = 16;
   table1[3]   = stepangle;
@@ -105,9 +109,12 @@ void StoreCurrentParameters()
   table1[14]  = closemode;
 
   NVIC_DisableIRQ(USART1_IRQn);
-  STMFLASH_Write(Data_Store_Address, table1, sizeof(table1));
+  STMFLASH_Write(Data_Store_Address, (uint16_t*)table1, sizeof(table1));
   NVIC_EnableIRQ(USART1_IRQn);
 
   LL_mDelay(250);
   LED_L;
+
+  //Exit menu
+  ExitMenu();
 }

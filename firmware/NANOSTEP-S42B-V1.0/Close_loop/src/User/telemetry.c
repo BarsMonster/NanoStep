@@ -17,7 +17,7 @@ void StreamAngle()
   streamedAng.angle = (float)y;
 
   // Use 'y' which is read in the controller loop
-  uint8_t len = Serial_GeneratePacket(SERIAL_MSG_ANGLE, &streamedAng, sizeof(streamedAng));
+  uint8_t len = Serial_GeneratePacket(SERIAL_MSG_ANGLE, (unsigned char *)&streamedAng, sizeof(streamedAng));
   UART1_Write(packetBuffer, len);
 
   prevStreamTickCount = tickCount;

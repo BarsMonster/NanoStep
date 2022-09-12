@@ -9,7 +9,7 @@ drawFunc_t draw;
 clearFunc_t clear;
 
 // Number conversion buffer
-uint8_t numBuf[5];
+char numBuf[5];
 
 // Default variable change function, adds the passed val to value
 void Menu_Variable_Change(struct Menu *menu, int16_t val);

@@ -43,6 +43,9 @@
 #include "stm32f0xx_ll_system.h"
 #include "stm32f0xx_ll_gpio.h"
 #include "stm32f0xx_ll_exti.h"
+
+extern int32_t rampup_current;
+
 #include "main.h"
 /* Exported types ------------------------------------------------------------*/
 /* Exported constants --------------------------------------------------------*/

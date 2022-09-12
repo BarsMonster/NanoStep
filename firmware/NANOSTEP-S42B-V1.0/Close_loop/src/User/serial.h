@@ -42,16 +42,18 @@ enum PARSE_STATUS
 };
 
 // Message verification error bitfield
-enum MSG_ERROR
+typedef enum
 {
     MSG_ERROR_NONE = 0,
     MSG_ERROR_SEQUENCE = 1,
     MSG_ERROR_CHECKSUM = 2,
-} error;
+} MSG_ERROR;
 
-uint8_t parseBuffer[PACKET_LENGTH_MAX];     // Buffer used for parsing the received message
-uint8_t msgLength;                          // Length of the received message without preamble
-uint8_t packetBuffer[PACKET_LENGTH_MAX];    // Hold the last generated packet
+extern MSG_ERROR error;
+
+extern uint8_t parseBuffer[PACKET_LENGTH_MAX];     // Buffer used for parsing the received message
+//uint8_t msgLength;                          // Length of the received message without preamble
+extern uint8_t packetBuffer[PACKET_LENGTH_MAX];    // Hold the last generated packet
 
 void Serial_Init();
 uint8_t Serial_Parse(uint8_t data);

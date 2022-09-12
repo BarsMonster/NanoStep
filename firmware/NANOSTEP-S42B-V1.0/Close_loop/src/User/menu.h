@@ -1,3 +1,4 @@
+#pragma once
 /*
  * A basic menu function
  * 

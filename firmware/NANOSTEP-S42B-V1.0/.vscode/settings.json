@@ -8,6 +8,14 @@
         "cmath": "c",
         "limits": "c",
         "*.tcc": "c",
-        "typeinfo": "c"
+        "typeinfo": "c",
+        "cstdlib": "c",
+        "display.h": "c",
+        "main.h": "c",
+        "stm32f0xx_ll_dma.h": "c",
+        "stm32f0xx_ll_rcc.h": "c",
+        "stm32f0xx_ll_pwr.h": "c",
+        "tle5012b.h": "c",
+        "stm32f0xx_ll_tim.h": "c"
     }
 }

@@ -54,15 +54,18 @@ Therefore, I highly recommend to stick to 1.8° motors **for closed loop operati
 - There is now timeout in SPI readout code for TLE5012 (there were infinite loops when waiting for new data). If random glitch will happen there - system will not hang and retry in 33µs. 
 
 ## Main UI
-Err: Angular error between desired position & actual position. 
-Deg: Current reading of angle sensor
+Err: Angular error between desired position & actual position.  
+Deg: Current reading of angle sensor  
 ![Main interface](nanostep.jpg)
 
 ## MagView UI
-D: Combined magnetic field strength (Both X & Y axis). Must always be between ~40 and ~80% for best performance.
-X, y: Magnetic field reading from X and Y sensors. Must always be between ~40 and ~80% for best performance.
-Right column: Centering error / DC offset for X and Y axis. Must be below ~80% for best performance.
-If any reading touches 100% at any angle of the motor shaft - you must adjust magnet. 
+**Left column: ** 
+D: Combined magnetic field strength (Both X & Y axis). Must always be between ~40 and ~80% for best performance.  
+X, Y: Magnetic field reading from X and Y sensors. Must always be between ~40 and ~80% for best performance.  
+
+**Right column:** Centering error / DC offset for X and Y axis. Must be below ~80% for best performance.  
+
+If any reading touches 100% at any angle of the motor shaft - you must adjust magnet.  
 ![MagView interface](magview.jpg)
 
 ## Features inherited from TrueStep

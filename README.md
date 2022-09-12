@@ -11,6 +11,10 @@ On Z-axis application angular errors of <0.02° are typical (yes, manufacturer r
 
 Tested with no missed steps at 50kHz step signal.
 
+## Options to flash firmware
+- Using STLink programming dongle.
+- Using TrueStepTerminal & USB-Serial adapter.
+
 ## Recommendations
 - Attach magnet non-permanently and verify magnetic field strength, Peak field must be within 40-80% range. <40% sensetivity to environment & noise is higher. At >80% it is easy to saturate sensor if something changes in the future. If field is too low - you can decrease distance between magnet and sensor by removing PCB spacers or gluing magnet on plastic spacer.  Verify that angle reading is reacting to manual rotation of the motor when it is disabled. After you are satisfied with magnetic field strength - you can permanently glue it in place using 2-component epoxy. 
 - 1/16 microstepping is recommended for general use. For Z axis you can use finer subdivision (32, 64), but for XY there might less opportunity for systematic error correction.

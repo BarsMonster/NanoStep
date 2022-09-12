@@ -22,8 +22,8 @@ Tested with no missed steps at 50kHz step signal.
 
 ## Troubleshooting
 If angle sensor works, but closed loop control does not - there are 2 options:
-- Stepper direction is incorrect. You can set PI to 0, and see if system starts to work (effectively this converts system to open loop mode). if it works in open loop, and error is increasing with rotation - swap 2 pins on the left or on the right. 
-- Stepper motor pinout is incorrect. Swap 2 central pins. 
+- Stepper direction is incorrect. You can set PI to 0, and see if system starts to work (effectively this converts system to open loop mode). if it works in open loop, and error is increasing with rotation - swap 2 pins on the left or on the right of the motor. 
+- Stepper motor pinout is incorrect. Swap 2 central pins on motor. 
 
 ## Key changes
 - Calibration is no longer needed. Autocalibration is enabled in TLE5012. Requires 1.5 rotation for calibration. For perfect results - you can do Z axis move in the beginning of the print. Instead of calibration there is now "Reset" which resets settings to default. 

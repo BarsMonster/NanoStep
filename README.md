@@ -59,11 +59,12 @@ Deg: Current reading of angle sensor
 ![Main interface](nanostep.jpg)
 
 ## MagView UI
-**Left column: ** 
+**Left column:**  
 D: Combined magnetic field strength (Both X & Y axis). Must always be between ~40 and ~80% for best performance.  
 X, Y: Magnetic field reading from X and Y sensors. Must always be between ~40 and ~80% for best performance.  
 
-**Right column:** Centering error / DC offset for X and Y axis. Must be below ~80% for best performance.  
+**Right column:**  
+Centering error / DC offset for X and Y axis. Must be below ~80% for best performance.  
 
 If any reading touches 100% at any angle of the motor shaft - you must adjust magnet.  
 ![MagView interface](magview.jpg)

@@ -1,17 +1,35 @@
 # NanoStep
-Closed loop stepper motor driver firmware for the BTT S42B-V1.0/V1.1 board. Should be relatively easy to tweak for v2.0 board, but I miss hardware.
+Closed loop stepper motor driver firmware for the BTT S42B-V1.0/V1.1 hardware revision. v2.0 hardware revision features different microcontroller, so this code will not work. Looking forward for pull requets to have unified codebase for V1.0 and V2.0 hardware.
 
-My original goal was increasing angular precision of servomotor, targeting high-precision Z-axis of 3D printers. 
+My original goal was increasing angular precision of servomotor, targeting high-precision Z-axis of 3D printers (higher than intrinsic precision of stepper motor, which can have up to ~1° angular errors due to manufacturing tolerances). Second benefit of servo on Z axis is that it allows to set maximum Z axis acceleration (3000 mm/s²) without fearing missing steps: this shortens layer changes and reduces Z-seam. 
 
-While looking through all forks of S42B I realized that they share same fundamental flaw : PID is controlling effort (current), and much less care is given to positional accuracy. What happened was while error was small - current was dropping to 0. And when steps start comming in - they got missed due to too low current. 
+While looking through all forks of S42B I realized that they share same fundamental flaw : PID is primarily controlling effort (current), and much less care is given to positional accuracy. What happened was while error was small - current was dropping to 0. And when steps start comming in - they got missed due to too low current. Tweaking PID settings had little effect on dynamic response of S42B - and this is probably why many got quality degradation with it. 
+
+In NanoStep approach is different: step signals are perfectly feed trough and PI controller for error is disabled for ~0.6ms (so that we don't correct transient processes, which is impossible at 30kHz loop time), and only in pauses systematic error is analyzed and corrected. This ensures that in normal operations dynamic response it identical to open loop stepper, but systematic errors are tracked and corrected. Also, previously stepper motor was considered "ground truth" for angular reading, which can only ensure no missing steps, but cannot improve precision. Now NanoStep relies on autocalibrated as angular ground thruth. 
+
+On Z-axis application angular errors of <0.02° are typical (yes, manufacturer rated errors for TLE5012 are higher, but these are worst case values which we should not get with autocalibration and stable environment).
 
 Tested with no missed steps at 50kHz step signal.
+
+## Recommendations
+- Attach magnet non-permanently and verify magnetic field strength, Peak field must be within 40-80% range. <40% sensetivity to environment & noise is higher. At >80% it is easy to saturate sensor if something changes in the future. If field is too low - you can decrease distance between magnet and sensor by removing PCB spacers or gluing magnet on plastic spacer.  Verify that angle reading is reacting to manual rotation of the motor when it is disabled. After you are satisfied with magnetic field strength - you can permanently glue it in place using 2-component epoxy. 
+- 1/16 microstepping is recommended for general use. For Z axis you can use finer subdivision (32, 64), but for XY there might less opportunity for systematic error correction.
+- Set current at 50-80% of manufacturer recommendation for motor to avoid excessive heat. Temperature is one of main factors effecting TLE5012 systematic errors.
+- In the beginning of the print, after bed & nozzle are at final temperature - do test movement that is enough to rotate motor by 1.5 rotations or slightly more. This will autocalibrate angle sensor. 
+- It is recommended to not move printer / motor during operation. Change of external magnetic field (caused by earth magnetic field or external sources) will slightly affect readings. 
+- No need to set DIP switches. They are ignored and can be in any position. 
+- Note that there are 256 steps per rotation, not 200. Configuration of Marlin/Klipper will need to be slightly changed.
+
+## Troubleshooting
+If angle sensor works, but closed loop control does not - there are 2 options:
+- Stepper direction is incorrect. You can set PI to 0, and see if system starts to work (effectively this converts system to open loop mode). if it works in open loop, and error is increasing with rotation - swap 2 pins on the left or on the right. 
+- Stepper motor pinout is incorrect. Swap 2 central pins. 
 
 ## Key changes
 - Calibration is no longer needed. Autocalibration is enabled in TLE5012. Requires 1.5 rotation for calibration. For perfect results - you can do Z axis move in the beginning of the print. Instead of calibration there is now "Reset" which resets settings to default. 
 - TLE5012 now utilizes full 15-bit resolution vs 14-bit before. FIR filter further improves results. 
 - EN signal is processed in interrupt. Dramatically lower latency. 
-- DIR signal latency is reduced - less code in interrupt processing. Still around 2µs latency is expected (note that hardware steppers has around 0.2µs latency). But should be good enough. 
+- DIR signal latency is reduced - less code in interrupt processing. Still around 2µs latency is expected (hardware stepper drivers has around 0.2µs latency). But should be good enough. **Note, that it is no longer possible to reverse rotation direction in S42B-NanoStep settings.** This is sacrificed to reduce DIR latency. You can invert motor in Marlin/Klipper with no penalty in performance. 
 - No more floating point math in control loop. Perfect fixed point math everywhere. 
 - Main control loop is optimized and now runs at 30kHz vs 10kHz originally. 35-40kHz also fits, but I prefer to have some margin. 
 - OLED display is >10x faster. 
@@ -23,6 +41,7 @@ Tested with no missed steps at 50kHz step signal.
 - Current is fixed, will no longer reduce automatically. If you want to run cooler - feel free to reduce current below manufacturer recomendation. 50% current works just fine. 
 - Display always shows encoder reading - useful for debugging. 
 - Screensaver will switch off display after 1 minute of inactivity (en=0 or no steps)
+- There is now timeout in SPI readout code for TLE5012 (there were infinite loops when waiting for new data). If random glitch will happen there - system will not hang, and system will retry in 30µs. 
 
 ## Features from TrueStep
 - New UART [interface](SerialInterface.md) 

@@ -66,7 +66,8 @@ X, Y: Magnetic field reading from X and Y sensors. Must always be between ~40 an
 **Right column:**  
 Centering error / DC offset for X and Y axis. Must be below ~80% for best performance.  
 
-If any reading touches 100% at any angle of the motor shaft - you must adjust magnet.  
+If any reading touches 100% at any angle of the motor shaft - you must adjust magnet as accurate angle reading is impossible.  
+If left column reading is below 40% - noise and sensitivity to environment (temperature, external magnetic field) will be increased.
 ![MagView interface](magview.jpg)
 
 ## Features inherited from TrueStep

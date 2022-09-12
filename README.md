@@ -33,7 +33,7 @@ NanoStep only supports 1.8° steppers, and routinely achieves <0.02° angular er
 - Step-2-step non-linearity is most challenging part of closed loop steppers. 0.9° motors only make it worse. 
 - Easier to loose step
 
-Therefore, I hightly recommend to stick to 1.8° motors. If these were available, I would even actually recommend using 3.6-7.2° motors. 
+Therefore, I hightly recommend to stick to 1.8° motors. If these were available, I would even recommend using 3.6-7.2° motors. 
 
 ## Key changes
 - Calibration is no longer needed. Autocalibration is enabled in TLE5012. Requires 1.5 rotation for calibration. For perfect results - you can do Z axis move in the beginning of the print. Instead of calibration there is now "Reset" which resets settings to default. 

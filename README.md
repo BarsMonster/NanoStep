@@ -53,7 +53,25 @@ Therefore, I highly recommend to stick to 1.8° motors **for closed loop operati
 - Screensaver will switch off display after 1 minute of inactivity (en=0 or no steps). Otherwise OLED displays degrade after ~1 year of continuous operation. 
 - There is now timeout in SPI readout code for TLE5012 (there were infinite loops when waiting for new data). If random glitch will happen there - system will not hang and retry in 33µs. 
 
-## Features from TrueStep
+## Main UI
+Err: Angular error between desired position & actual position.  
+Deg: Current reading of angle sensor  
+![Main interface](nanostep.jpg)
+
+## MagView UI
+**Left column:**  
+D: Combined magnetic field strength (Both X & Y axis). Must always be between ~40 and ~80% for best performance.  
+X, Y: Magnetic field reading from X and Y sensors. Must always be between ~40 and ~80% for best performance.  
+
+**Right column:**  
+Centering error / DC offset for X and Y axis. Must be below ~80% for best performance.  
+
+If any reading touches 100% at any angle of the motor shaft - you must adjust magnet as accurate angle reading is impossible.  
+If D in left column is below 40%, or maximum absolute value of X/Y is below 40% - noise and sensitivity to environment (temperature, external magnetic field) will be increased.  
+Centering error in right column is "magnified" 16x by design of TLE5012. I.e. 100% centering error will equal shift of 12% reading on X or Y sensors in left column. Centering error below 100% is cancelled out by autocalibration. No need to push it to 0. 
+![MagView interface](magview.jpg)
+
+## Features inherited from TrueStep
 - New UART [interface](SerialInterface.md) 
   - Reduced packet overheads
   - Sequence counter to detect missing packets

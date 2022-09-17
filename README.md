@@ -70,7 +70,7 @@ X, Y: Magnetic field reading from X and Y sensors. Must always be between ~40 an
 **Right column:**  
 Centering error / DC offset for X and Y axis. Must be below ~80% for best performance.  
 
-If any reading touches 100% at any angle of the motor shaft - you must adjust magnet, as accurate angle reading is no longer impossible.  
+If any reading touches 100% at any angle of the motor shaft - you must adjust magnet, as accurate angle reading is no longer possible.  
 If D in left column is below 40%, or maximum absolute value of X/Y is below 40% - noise and sensitivity to environment (temperature, external magnetic field) will be increased.  
 Centering error in right column is "magnified" 16x by design of TLE5012. I.e. 100% centering error equals 6% reading on X or Y sensors in left column. Centering error below 100% is cancelled out by autocalibration. No need to push it to 0. 
 ![MagView interface](magview.jpg)

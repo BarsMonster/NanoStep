@@ -26,6 +26,7 @@
 #define max(a,b) ((a)>(b)?(a):(b))
 #define limitabs(a,b) ((a>0)?(min(a,b)):(max(a,-b)))
 #define sign(a) ((a>0)?1:((a<0)?-1:0))
+#define fw_version "1.51"
 //#define minabs(a,b) ((a>0)?(max(a,b)):(min(a,-b)))
 
 //#define MISO_Pin LL_GPIO_PIN_6

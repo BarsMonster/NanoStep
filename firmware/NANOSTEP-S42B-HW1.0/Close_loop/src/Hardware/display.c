@@ -113,7 +113,9 @@ void ShowInfoScreen()
 {
   OLED_Refresh_Gram();
   //OLED_ShowString(0,2,"CPU Idle:   0000");
-  OLED_ShowString(4,-3," NanoStep v1.5");
+  char buffer[32];
+  sprintf(buffer, "NanoStep v%s", fw_version);
+  OLED_ShowString(8,-3, buffer);
   for(int x=0;x<128;x++)OLED_DrawPoint(x,18, x&3);
   OLED_Refresh_Gram();
   OLED_ShowString(0,22,"Err:       0.00\"");

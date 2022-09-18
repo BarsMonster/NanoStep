@@ -205,6 +205,7 @@ int main(void)
     //MX_USART1_UART_Init();                                      //USART Init
 
     MX_TIM1_Init();                                             //Counter steps
+    EXTI0_1_IRQHandler();//Manually trigger DIR handling code to start moving in correct direction in the beginning
     MX_TIM3_Init();                                             //PWM
     MX_TIM6_Init();                                             //Control loop
     
